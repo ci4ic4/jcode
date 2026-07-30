@@ -381,3 +381,65 @@ fn netbsd_parsers_reject_malformed_status_lines() {
     assert_eq!(parse_parent_pid(""), None);
     assert_eq!(parse_parent_pid("cat 1 2"), None);
 }
+
+/// End-to-end check that the NetBSD implementation actually reports a live
+/// pipe reader as `Reading`. The parser tests above use captured fixtures, so
+/// without this a wrong wait-channel list or a broken fd-type gate would still
+/// look green.
+#[cfg(target_os = "netbsd")]
+#[test]
+fn netbsd_detects_a_live_process_blocked_reading_a_pipe() {
+    use std::process::{Command, Stdio};
+
+    // `sleep` holds the write end open without producing data, so `cat` parks
+    // in read() on the pipe for the duration of the test.
+    let mut producer = Command::new("sleep")
+        .arg("30")
+        .stdout(Stdio::piped())
+        .spawn()
+        .expect("spawn producer");
+    let pipe = producer.stdout.take().expect("producer stdout");
+    let mut reader = Command::new("cat")
+        .stdin(Stdio::from(pipe))
+        .stdout(Stdio::null())
+        .spawn()
+        .expect("spawn reader");
+
+    std::thread::sleep(std::time::Duration::from_millis(500));
+    let state = super::netbsd::check(reader.id());
+
+    let _ = reader.kill();
+    let _ = reader.wait();
+    let _ = producer.kill();
+    let _ = producer.wait();
+
+    assert_eq!(
+        state,
+        StdinState::Reading,
+        "cat blocked on an empty pipe should report Reading"
+    );
+}
+
+/// Guard against the opposite failure: a sleeping process must not be
+/// mistaken for one waiting on stdin, or the bash tool would prompt the user
+/// for input on every long-running command.
+#[cfg(target_os = "netbsd")]
+#[test]
+fn netbsd_does_not_report_a_sleeping_process_as_reading_stdin() {
+    let mut sleeper = std::process::Command::new("sleep")
+        .arg("30")
+        .spawn()
+        .expect("spawn sleeper");
+
+    std::thread::sleep(std::time::Duration::from_millis(500));
+    let state = super::netbsd::check(sleeper.id());
+
+    let _ = sleeper.kill();
+    let _ = sleeper.wait();
+
+    assert_ne!(
+        state,
+        StdinState::Reading,
+        "a sleeping process must not look like a stdin reader"
+    );
+}

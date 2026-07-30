@@ -1254,4 +1254,41 @@ mod tests {
             "pss split should be consistent"
         );
     }
+
+    /// The NetBSD snapshot reads `/proc/self/statm`, `getrusage`, and
+    /// `/proc/self/task` rather than Linux's `/proc/self/status`. Assert it
+    /// returns live, self-consistent numbers: the whole point of the NetBSD
+    /// path is that the previous fallback silently returned all-`None`
+    /// defaults, which no type-level check would catch.
+    #[cfg(target_os = "netbsd")]
+    #[test]
+    fn netbsd_snapshot_reports_live_process_memory() {
+        let snapshot = snapshot_with_source("test");
+
+        let rss = snapshot
+            .rss_bytes
+            .expect("rss should be readable via statm");
+        assert!(
+            rss > 1024 * 1024,
+            "a running test process should hold more than 1MiB, got {rss}"
+        );
+
+        let virt = snapshot
+            .virtual_bytes
+            .expect("virtual size should be readable via statm");
+        assert!(
+            virt >= rss,
+            "virtual size {virt} should be at least rss {rss}"
+        );
+
+        let peak = snapshot
+            .peak_rss_bytes
+            .expect("peak rss should be readable via getrusage");
+        assert!(peak >= rss, "peak rss {peak} should be at least rss {rss}");
+
+        let threads = snapshot
+            .thread_count
+            .expect("thread count should be readable via /proc/self/task");
+        assert!(threads >= 1, "expected at least one thread, got {threads}");
+    }
 }
