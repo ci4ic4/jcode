@@ -334,7 +334,9 @@ fn send_desktop_notification(title: &str, body: &str) {
             .spawn();
     }
 
-    #[cfg(target_os = "linux")]
+    // libnotify's notify-send is the freedesktop notifier on Linux and the
+    // BSDs alike; gate on "unix minus macOS" so BSD desktops get notices too.
+    #[cfg(all(unix, not(target_os = "macos")))]
     {
         let _ = std::process::Command::new("notify-send")
             .arg("--app-name=jcode")
@@ -372,7 +374,7 @@ fn send_desktop_notification(title: &str, body: &str) {
             .spawn();
     }
 
-    #[cfg(not(any(target_os = "macos", target_os = "linux", windows)))]
+    #[cfg(not(any(unix, windows)))]
     let _ = (title, body);
 }
 

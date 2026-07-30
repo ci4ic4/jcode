@@ -805,7 +805,9 @@ impl BashTool {
                             loop {
                                 #[cfg(target_os = "linux")]
                                 let state = stdin_detect::linux::check_process_tree(child_pid);
-                                #[cfg(not(target_os = "linux"))]
+                                #[cfg(target_os = "netbsd")]
+                                let state = stdin_detect::netbsd::check_process_tree(child_pid);
+                                #[cfg(not(any(target_os = "linux", target_os = "netbsd")))]
                                 let state = stdin_detect::is_waiting_for_stdin(child_pid);
 
                                 if state == StdinState::Reading {
