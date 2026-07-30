@@ -27,6 +27,20 @@ pub fn is_waiting_for_stdin(pid: u32) -> StdinState {
     return StdinState::Unknown;
 }
 
+/// Like [`is_waiting_for_stdin`], but also walks descendants so wrapper chains
+/// (`sh -> wrapper -> reader`) are detected. Platforms without a tree walker
+/// fall back to checking the process itself.
+pub fn is_waiting_for_stdin_in_tree(pid: u32) -> StdinState {
+    #[cfg(target_os = "linux")]
+    return linux::check_process_tree(pid);
+
+    #[cfg(target_os = "netbsd")]
+    return netbsd::check_process_tree(pid);
+
+    #[cfg(not(any(target_os = "linux", target_os = "netbsd")))]
+    return is_waiting_for_stdin(pid);
+}
+
 /// Pure parsers for NetBSD's single-line `/proc/<pid>/status` format.
 ///
 /// Kept outside the `netbsd` module (and always compiled) so the field-offset
@@ -50,7 +64,11 @@ pub mod netbsd_status {
     /// sid, tdev, flags, start, utime, stime, wchan, euid, groups.
     pub fn parse_parent_pid(status: &str) -> Option<u32> {
         let fields: Vec<&str> = status.split_whitespace().collect();
-        fields.get(fields.len().checked_sub(11)?)?.parse().ok()
+        match fields.get(fields.len().checked_sub(11)?)?.parse::<u32>() {
+            Ok(ppid) => Some(ppid),
+            // A malformed status line means "cannot determine", not pid 0.
+            Err(_) => None,
+        }
     }
 }
 

@@ -177,35 +177,17 @@ pub fn snapshot_with_source(source: impl Into<String>) -> ProcessMemorySnapshot 
     snapshot
 }
 
-/// NetBSD exposes a Linux-compatible `/proc/self/statm` (page counts) even
-/// though its `/proc/self/status` is the BSD single-line format, so RSS and
-/// virtual size are read from `statm`, peak RSS from `getrusage`, and the
-/// thread count from `/proc/self/task`. The Linux-only smaps_rollup breakdown
-/// (PSS and friends) has no NetBSD equivalent and stays `None`.
+/// NetBSD snapshot. See [`crate::process_memory_netbsd`] for why each field
+/// comes from a different source than the Linux path.
 #[cfg(target_os = "netbsd")]
 pub fn snapshot_with_source(source: impl Into<String>) -> ProcessMemorySnapshot {
     let source = source.into();
-    let page_size = netbsd_page_size();
-    let statm = std::fs::read_to_string("/proc/self/statm").ok();
-    let fields: Vec<u64> = statm
-        .as_deref()
-        .map(|text| {
-            text.split_whitespace()
-                .filter_map(|field| field.parse::<u64>().ok())
-                .collect()
-        })
-        .unwrap_or_default();
-    let pages_to_bytes = |index: usize| {
-        fields
-            .get(index)
-            .map(|pages| pages.saturating_mul(page_size))
-    };
-
+    let (virtual_bytes, rss_bytes) = crate::process_memory_netbsd::size_and_rss_bytes();
     let snapshot = ProcessMemorySnapshot {
-        rss_bytes: pages_to_bytes(1),
-        peak_rss_bytes: netbsd_peak_rss_bytes(),
-        virtual_bytes: pages_to_bytes(0),
-        thread_count: netbsd_thread_count(),
+        rss_bytes,
+        peak_rss_bytes: crate::process_memory_netbsd::peak_rss_bytes(),
+        virtual_bytes,
+        thread_count: crate::process_memory_netbsd::thread_count(),
         main_stack_bytes: None,
         os: None,
         allocator: allocator_info(),
@@ -219,35 +201,6 @@ pub fn snapshot_with_source(source: impl Into<String>) -> ProcessMemorySnapshot 
     ));
     record_snapshot(source, snapshot.clone());
     snapshot
-}
-
-#[cfg(target_os = "netbsd")]
-fn netbsd_page_size() -> u64 {
-    // SAFETY: sysconf is thread-safe and takes no pointers.
-    let raw = unsafe { libc::sysconf(libc::_SC_PAGESIZE) };
-    if raw > 0 { raw as u64 } else { 4096 }
-}
-
-/// Peak RSS via `getrusage(RUSAGE_SELF)`. NetBSD reports `ru_maxrss` in
-/// kilobytes.
-#[cfg(target_os = "netbsd")]
-fn netbsd_peak_rss_bytes() -> Option<u64> {
-    // SAFETY: `usage` is a valid, fully-owned rusage the kernel writes into.
-    let mut usage: libc::rusage = unsafe { std::mem::zeroed() };
-    let rc = unsafe { libc::getrusage(libc::RUSAGE_SELF, &mut usage) };
-    if rc != 0 {
-        return None;
-    }
-    u64::try_from(usage.ru_maxrss)
-        .ok()
-        .map(|kb| kb.saturating_mul(1024))
-}
-
-#[cfg(target_os = "netbsd")]
-fn netbsd_thread_count() -> Option<u64> {
-    let entries = std::fs::read_dir("/proc/self/task").ok()?;
-    let count = entries.filter(|entry| entry.is_ok()).count() as u64;
-    (count > 0).then_some(count)
 }
 
 #[cfg(not(any(target_os = "linux", target_os = "netbsd")))]

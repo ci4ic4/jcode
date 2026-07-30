@@ -53,6 +53,25 @@ impl CliSource {
     }
 }
 
+/// Setup guidance for platforms with no automatic global-hotkey install (the
+/// BSDs, for instance).
+///
+/// Hotkey install is compositor-specific, but the Claude/Codex launch
+/// reminders below are plain config-file writes with no platform dependency,
+/// so those are still offered rather than doing nothing.
+#[cfg(not(any(windows, target_os = "macos", target_os = "linux")))]
+pub(super) fn print_manual_platform_setup() {
+    eprintln!("\x1b[1mjcode setup-hotkey\x1b[0m");
+    eprintln!();
+    eprintln!("Automatic global hotkey install is not available on this platform.");
+    eprintln!("Add a keybinding in your desktop environment's keyboard settings:");
+    eprintln!("  - niri: bindings in ~/.config/niri/config.kdl");
+    eprintln!("  - GNOME: Settings > Keyboard > Custom Shortcuts");
+    eprintln!("  - KDE: System Settings > Shortcuts > Custom Shortcuts");
+    eprintln!("  - sway/i3: a `bindsym` line in the compositor config");
+    super::install_cli_launch_hints_notice();
+}
+
 pub(super) fn install_available() -> Result<Vec<String>> {
     let mut installed = Vec::new();
 
