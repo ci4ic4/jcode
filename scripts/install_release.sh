@@ -90,8 +90,11 @@ echo "Updated launcher symlink: $install_dir/jcode -> $current_dir/jcode"
 # Configure supported desktop launch hotkeys as part of installation. This is
 # idempotent and best-effort because headless installs may not expose a desktop
 # session; the first interactive launch retries automatically.
+# Runs on any unix: where automatic hotkey install is unsupported (the BSDs),
+# the command still installs the portable Claude/Codex launch reminders and
+# prints manual guidance, so there is nothing to gain by skipping it.
 case "$(uname -s)" in
-  Darwin|Linux)
+  Darwin|Linux|*BSD|DragonFly)
     if "$install_dir/jcode" setup-hotkey </dev/null >/dev/null 2>&1; then
       echo "Configured system-wide jcode launch hotkeys (when supported)."
     fi
