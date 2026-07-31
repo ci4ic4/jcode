@@ -177,31 +177,8 @@ pub fn snapshot_with_source(source: impl Into<String>) -> ProcessMemorySnapshot 
     snapshot
 }
 
-/// NetBSD snapshot. See [`crate::process_memory_netbsd`] for why each field
-/// comes from a different source than the Linux path.
 #[cfg(target_os = "netbsd")]
-pub fn snapshot_with_source(source: impl Into<String>) -> ProcessMemorySnapshot {
-    let source = source.into();
-    let (virtual_bytes, rss_bytes) = crate::process_memory_netbsd::size_and_rss_bytes();
-    let snapshot = ProcessMemorySnapshot {
-        rss_bytes,
-        peak_rss_bytes: crate::process_memory_netbsd::peak_rss_bytes(),
-        virtual_bytes,
-        thread_count: crate::process_memory_netbsd::thread_count(),
-        main_stack_bytes: None,
-        os: None,
-        allocator: allocator_info(),
-    };
-    logging::debug(&format!(
-        "process memory snapshot source={source} rss={:?} peak_rss={:?} virtual={:?} allocator={}",
-        snapshot.rss_bytes,
-        snapshot.peak_rss_bytes,
-        snapshot.virtual_bytes,
-        snapshot.allocator.name
-    ));
-    record_snapshot(source, snapshot.clone());
-    snapshot
-}
+pub use crate::process_memory_netbsd::snapshot_with_source;
 
 #[cfg(not(any(target_os = "linux", target_os = "netbsd")))]
 pub fn snapshot_with_source(source: impl Into<String>) -> ProcessMemorySnapshot {
@@ -696,7 +673,7 @@ fn parse_retention_trim_threshold(value: Option<&str>) -> u64 {
     }
 }
 
-fn record_snapshot(source: String, snapshot: ProcessMemorySnapshot) {
+pub(crate) fn record_snapshot(source: String, snapshot: ProcessMemorySnapshot) {
     let Ok(mut history) = memory_history().lock() else {
         logging::error("process memory history lock poisoned; dropping snapshot");
         return;
@@ -1206,42 +1183,5 @@ mod tests {
             anon + file <= pss + 2 * 1024 * 1024,
             "pss split should be consistent"
         );
-    }
-
-    /// The NetBSD snapshot reads `/proc/self/statm`, `getrusage`, and
-    /// `/proc/self/task` rather than Linux's `/proc/self/status`. Assert it
-    /// returns live, self-consistent numbers: the whole point of the NetBSD
-    /// path is that the previous fallback silently returned all-`None`
-    /// defaults, which no type-level check would catch.
-    #[cfg(target_os = "netbsd")]
-    #[test]
-    fn netbsd_snapshot_reports_live_process_memory() {
-        let snapshot = snapshot_with_source("test");
-
-        let rss = snapshot
-            .rss_bytes
-            .expect("rss should be readable via statm");
-        assert!(
-            rss > 1024 * 1024,
-            "a running test process should hold more than 1MiB, got {rss}"
-        );
-
-        let virt = snapshot
-            .virtual_bytes
-            .expect("virtual size should be readable via statm");
-        assert!(
-            virt >= rss,
-            "virtual size {virt} should be at least rss {rss}"
-        );
-
-        let peak = snapshot
-            .peak_rss_bytes
-            .expect("peak rss should be readable via getrusage");
-        assert!(peak >= rss, "peak rss {peak} should be at least rss {rss}");
-
-        let threads = snapshot
-            .thread_count
-            .expect("thread count should be readable via /proc/self/task");
-        assert!(threads >= 1, "expected at least one thread, got {threads}");
     }
 }
